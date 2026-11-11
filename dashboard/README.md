@@ -335,13 +335,13 @@ microk8s kubectl -n crosslayer-dashboard rollout status deployment/crosslayer-da
 
 The API uses a read-only Kubernetes service account, the in-cluster Prometheus service,
 and the experiment API service. Its NodePort is for the private cluster network. Do not
-expose NodePort `30080` directly on the router.
+expose NodePort `30082` directly on the router.
 
 ### Publish the API with DuckDNS and Caddy
 
 This route makes the authenticated dashboard API publicly reachable. Use a new, strong
 dashboard password. Never expose the Kubernetes API server, Prometheus ports, or NodePort
-`30080` on the router.
+`30082` on the router.
 
 1. Create a free DuckDNS hostname at [duckdns.org](https://www.duckdns.org/) and note
    the subdomain and update token. Do not send the token in chat or commit it.
@@ -352,7 +352,7 @@ dashboard password. Never expose the Kubernetes API server, Prometheus ports, or
 3. Give the MicroK8s master a reserved LAN address in the router (currently
    `10.2.0.145`). Forward **TCP 80 and 443 only** from the router to that address. If a
    host firewall is enabled, allow inbound TCP 80 and 443. Do not forward ports `30080`,
-   `8003`, `9091`, or Kubernetes API ports.
+   `30081`, `30082`, `8003`, `9091`, or Kubernetes API ports.
 4. Configure the DuckDNS updater on the master. Create a root-only curl config; replace
    the placeholders locally, and keep this file out of Git:
 
