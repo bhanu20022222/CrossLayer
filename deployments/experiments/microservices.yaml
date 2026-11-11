@@ -1,0 +1,322 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: experiment-api
+  namespace: crosslayer-experiments
+  labels:
+    app: crosslayer-experiment
+    component: api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: crosslayer-experiment
+      component: api
+  template:
+    metadata:
+      labels:
+        app: crosslayer-experiment
+        component: api
+        service: experiment-api
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: app
+          image: 10.2.0.145:32000/etl-pipeline@sha256:0d8c5caae96c43615a4df66f5749e74d369bd3c96f01908c1d5b5e9dc59714fc
+          imagePullPolicy: IfNotPresent
+          command: ["python3"]
+          args: ["/app/experiment_service.py"]
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: SERVICE_NAME
+              value: experiment-api
+            - name: SERVICE_ROLE
+              value: api
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: WORKER_URL
+              value: http://experiment-worker.crosslayer-experiments.svc.cluster.local.:8080/process
+          volumeMounts:
+            - name: source
+              mountPath: /app
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 15
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+      volumes:
+        - name: source
+          configMap:
+            name: crosslayer-experiment-service-code
+            items:
+              - key: experiment_service.py
+                path: experiment_service.py
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: experiment-api
+  namespace: crosslayer-experiments
+  labels:
+    app: crosslayer-experiment
+    component: api
+spec:
+  selector:
+    app: crosslayer-experiment
+    component: api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: experiment-worker
+  namespace: crosslayer-experiments
+  labels:
+    app: crosslayer-experiment
+    component: worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: crosslayer-experiment
+      component: worker
+  template:
+    metadata:
+      labels:
+        app: crosslayer-experiment
+        component: worker
+        service: experiment-worker
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: app
+          image: 10.2.0.145:32000/etl-pipeline@sha256:0d8c5caae96c43615a4df66f5749e74d369bd3c96f01908c1d5b5e9dc59714fc
+          imagePullPolicy: IfNotPresent
+          command: ["python3"]
+          args: ["/app/experiment_service.py"]
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: SERVICE_NAME
+              value: experiment-worker
+            - name: SERVICE_ROLE
+              value: worker
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: STORE_URL
+              value: http://experiment-store.crosslayer-experiments.svc.cluster.local.:8080/read
+          volumeMounts:
+            - name: source
+              mountPath: /app
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 15
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi
+      volumes:
+        - name: source
+          configMap:
+            name: crosslayer-experiment-service-code
+            items:
+              - key: experiment_service.py
+                path: experiment_service.py
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: experiment-worker
+  namespace: crosslayer-experiments
+  labels:
+    app: crosslayer-experiment
+    component: worker
+spec:
+  selector:
+    app: crosslayer-experiment
+    component: worker
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: experiment-store
+  namespace: crosslayer-experiments
+  labels:
+    app: crosslayer-experiment
+    component: store
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: crosslayer-experiment
+      component: store
+  template:
+    metadata:
+      labels:
+        app: crosslayer-experiment
+        component: store
+        service: experiment-store
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: app
+          image: 10.2.0.145:32000/etl-pipeline@sha256:0d8c5caae96c43615a4df66f5749e74d369bd3c96f01908c1d5b5e9dc59714fc
+          imagePullPolicy: IfNotPresent
+          command: ["python3"]
+          args: ["/app/experiment_service.py"]
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: SERVICE_NAME
+              value: experiment-store
+            - name: SERVICE_ROLE
+              value: store
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          volumeMounts:
+            - name: source
+              mountPath: /app
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 15
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+      volumes:
+        - name: source
+          configMap:
+            name: crosslayer-experiment-service-code
+            items:
+              - key: experiment_service.py
+                path: experiment_service.py
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: experiment-store
+  namespace: crosslayer-experiments
+  labels:
+    app: crosslayer-experiment
+    component: store
+spec:
+  selector:
+    app: crosslayer-experiment
+    component: store
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: crosslayer-experiment-services
+  namespace: crosslayer-experiments
+  labels:
+    release: kube-prom-stack
+spec:
+  namespaceSelector:
+    matchNames: ["crosslayer-experiments"]
+  selector:
+    matchLabels:
+      app: crosslayer-experiment
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 10s
+      scrapeTimeout: 5s

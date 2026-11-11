@@ -1,0 +1,68 @@
+# Dashboard
+dashboard/frontend/node_modules/
+dashboard/frontend/dist/
+dashboard/backend/.venv/
+
+# Python
+__pycache__/
+.pytest_cache/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# Go
+/vendor/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# IDE
+.idea/
+.vscode/
+.netlify/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Kubernetes
+*.kubeconfig
+kubeconfig
+
+# ML
+*.pkl
+*.joblib
+*.h5
+*.model
+ml-engine/models/*.pt
+ml-engine/data/raw/
+ml-engine/data/processed/
+
+# Experiments
+experiments/raw-results/*.csv
+experiments/raw-results/*.json
+
+# Docker
+.docker/
+
+# Environment
+.env
+.env.local
+
+# Logs
+*.log
+logs/

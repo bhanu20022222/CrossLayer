@@ -1,0 +1,436 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: document-retrieval-envoy
+  namespace: crosslayer-workloads
+  labels:
+    project: crosslayer
+    component: telemetry
+data:
+  envoy.yaml: |
+    admin:
+      access_log_path: /dev/null
+      address:
+        socket_address:
+          address: 0.0.0.0
+          port_value: 9901
+    static_resources:
+      listeners:
+        - name: service_listener
+          address:
+            socket_address:
+              address: 0.0.0.0
+              port_value: 8080
+          filter_chains:
+            - filters:
+                - name: envoy.filters.network.http_connection_manager
+                  typed_config:
+                    "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                    stat_prefix: ingress_http
+                    route_config:
+                      name: service_routes
+                      virtual_hosts:
+                        - name: document_retrieval
+                          domains: ["*"]
+                          routes:
+                            - match:
+                                prefix: /
+                              route:
+                                cluster: document_retrieval_app
+                    http_filters:
+                      - name: envoy.filters.http.router
+                        typed_config:
+                          "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+      clusters:
+        - name: document_retrieval_app
+          type: STRICT_DNS
+          connect_timeout: 2s
+          dns_lookup_family: V4_ONLY
+          lb_policy: ROUND_ROBIN
+          load_assignment:
+            cluster_name: document_retrieval_app
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        socket_address:
+                          address: document-retrieval-upstream.crosslayer-workloads.svc.cluster.local.
+                          port_value: 8080
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: document-verification-envoy
+  namespace: crosslayer-workloads
+  labels:
+    project: crosslayer
+    component: telemetry
+data:
+  envoy.yaml: |
+    admin:
+      access_log_path: /dev/null
+      address:
+        socket_address:
+          address: 0.0.0.0
+          port_value: 9901
+    static_resources:
+      listeners:
+        - name: service_listener
+          address:
+            socket_address:
+              address: 0.0.0.0
+              port_value: 8080
+          filter_chains:
+            - filters:
+                - name: envoy.filters.network.http_connection_manager
+                  typed_config:
+                    "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                    stat_prefix: ingress_http
+                    route_config:
+                      name: service_routes
+                      virtual_hosts:
+                        - name: document_verification
+                          domains: ["*"]
+                          routes:
+                            - match:
+                                prefix: /
+                              route:
+                                cluster: document_verification_app
+                    http_filters:
+                      - name: envoy.filters.http.router
+                        typed_config:
+                          "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+      clusters:
+        - name: document_verification_app
+          type: STRICT_DNS
+          connect_timeout: 2s
+          dns_lookup_family: V4_ONLY
+          lb_policy: ROUND_ROBIN
+          load_assignment:
+            cluster_name: document_verification_app
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        socket_address:
+                          address: document-verification-upstream.crosslayer-workloads.svc.cluster.local.
+                          port_value: 8081
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: document-retrieval-upstream
+  namespace: crosslayer-workloads
+  labels:
+    app: document-retrieval-upstream
+    envoy_service: document-retrieval
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+  selector:
+    app: document-retrieval
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: document-verification-upstream
+  namespace: crosslayer-workloads
+  labels:
+    app: document-verification-upstream
+    envoy_service: document-verification
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8081
+      targetPort: 8081
+      protocol: TCP
+  selector:
+    app: document-verification
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: document-retrieval-envoy
+  namespace: crosslayer-workloads
+  labels:
+    app: crosslayer-envoy
+    envoy_service: document-retrieval
+    project: crosslayer
+    component: proxy
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: crosslayer-envoy
+      envoy_service: document-retrieval
+  template:
+    metadata:
+      labels:
+        app: crosslayer-envoy
+        envoy_service: document-retrieval
+        project: crosslayer
+        component: proxy
+      annotations:
+        crosslayer.io/config-version: "2"
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: crosslayer-envoy
+              envoy_service: document-retrieval
+      containers:
+        - name: envoy
+          image: localhost:32000/crosslayer/envoy@sha256:49d3e8b6246d1a804acffaebe42f2799edc77b77a37a97709ef742af90b6d223
+          imagePullPolicy: IfNotPresent
+          command: ["envoy"]
+          args:
+            - "-c"
+            - "/etc/envoy/envoy.yaml"
+            - "--service-cluster"
+            - "document-retrieval"
+            - "--service-node"
+            - "$(POD_NAME)"
+            - "--disable-hot-restart"
+            - "--log-level"
+            - "info"
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: metrics
+              containerPort: 9901
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+          startupProbe:
+            httpGet:
+              path: /ready
+              port: 9901
+            periodSeconds: 5
+            failureThreshold: 24
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 9901
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /ready
+              port: 9901
+            periodSeconds: 10
+          volumeMounts:
+            - name: envoy-config
+              mountPath: /etc/envoy
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: envoy-config
+          configMap:
+            name: document-retrieval-envoy
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: document-verification-envoy
+  namespace: crosslayer-workloads
+  labels:
+    app: crosslayer-envoy
+    envoy_service: document-verification
+    project: crosslayer
+    component: proxy
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: crosslayer-envoy
+      envoy_service: document-verification
+  template:
+    metadata:
+      labels:
+        app: crosslayer-envoy
+        envoy_service: document-verification
+        project: crosslayer
+        component: proxy
+      annotations:
+        crosslayer.io/config-version: "2"
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: crosslayer-envoy
+              envoy_service: document-verification
+      containers:
+        - name: envoy
+          image: localhost:32000/crosslayer/envoy@sha256:49d3e8b6246d1a804acffaebe42f2799edc77b77a37a97709ef742af90b6d223
+          imagePullPolicy: IfNotPresent
+          command: ["envoy"]
+          args:
+            - "-c"
+            - "/etc/envoy/envoy.yaml"
+            - "--service-cluster"
+            - "document-verification"
+            - "--service-node"
+            - "$(POD_NAME)"
+            - "--disable-hot-restart"
+            - "--log-level"
+            - "info"
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: metrics
+              containerPort: 9901
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+          startupProbe:
+            httpGet:
+              path: /ready
+              port: 9901
+            periodSeconds: 5
+            failureThreshold: 24
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 9901
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /ready
+              port: 9901
+            periodSeconds: 10
+          volumeMounts:
+            - name: envoy-config
+              mountPath: /etc/envoy
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: envoy-config
+          configMap:
+            name: document-verification-envoy
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: document-retrieval-envoy-metrics
+  namespace: crosslayer-workloads
+  labels:
+    app: document-retrieval-envoy-metrics
+    project: crosslayer
+    telemetry: envoy
+    envoy_service: document-retrieval
+spec:
+  type: ClusterIP
+  ports:
+    - name: metrics
+      port: 9901
+      targetPort: metrics
+      protocol: TCP
+  selector:
+    app: crosslayer-envoy
+    envoy_service: document-retrieval
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: document-verification-envoy-metrics
+  namespace: crosslayer-workloads
+  labels:
+    app: document-verification-envoy-metrics
+    project: crosslayer
+    telemetry: envoy
+    envoy_service: document-verification
+spec:
+  type: ClusterIP
+  ports:
+    - name: metrics
+      port: 9901
+      targetPort: metrics
+      protocol: TCP
+  selector:
+    app: crosslayer-envoy
+    envoy_service: document-verification
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: crosslayer-envoy
+  namespace: observability
+  labels:
+    release: kube-prom-stack
+    project: crosslayer
+spec:
+  namespaceSelector:
+    matchNames:
+      - crosslayer-workloads
+  selector:
+    matchLabels:
+      telemetry: envoy
+  targetLabels:
+    - envoy_service
+  endpoints:
+    - port: metrics
+      path: /stats/prometheus
+      interval: 15s
+      scrapeTimeout: 5s

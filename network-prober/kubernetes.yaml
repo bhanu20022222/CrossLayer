@@ -1,0 +1,144 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: crosslayer-network-prober-v2
+  namespace: crosslayer-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: crosslayer-network-prober-v2
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: crosslayer-network-prober-v2
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: crosslayer-network-prober-v2
+subjects:
+  - kind: ServiceAccount
+    name: crosslayer-network-prober-v2
+    namespace: crosslayer-system
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: crosslayer-network-prober-v2
+  namespace: crosslayer-system
+  labels:
+    app: network-prober-v2
+spec:
+  selector:
+    matchLabels:
+      app: network-prober-v2
+  template:
+    metadata:
+      labels:
+        app: network-prober-v2
+    spec:
+      serviceAccountName: crosslayer-network-prober-v2
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      tolerations:
+        - operator: Exists
+      securityContext:
+        runAsNonRoot: false
+        runAsUser: 0
+        runAsGroup: 0
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: network-prober
+          image: 10.2.0.145:32000/etl-pipeline@sha256:0d8c5caae96c43615a4df66f5749e74d369bd3c96f01908c1d5b5e9dc59714fc
+          imagePullPolicy: IfNotPresent
+          command: ["python3"]
+          args: ["-m", "network_prober"]
+          ports:
+            - name: metrics
+              containerPort: 9116
+              protocol: TCP
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: METRICS_PORT
+              value: "9116"
+            - name: PROBE_INTERVAL_SECONDS
+              value: "10"
+            - name: PROBE_TIMEOUT_SECONDS
+              value: "1"
+            - name: TARGET_REFRESH_SECONDS
+              value: "60"
+            - name: PYTHONPATH
+              value: /opt/prober
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+          volumeMounts:
+            - name: source
+              mountPath: /opt/prober/network_prober
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+              add: ["NET_RAW"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+      volumes:
+        - name: source
+          configMap:
+            name: crosslayer-network-prober-v2-code
+            items:
+              - key: __init__.py
+                path: __init__.py
+              - key: __main__.py
+                path: __main__.py
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: crosslayer-network-prober-v2
+  namespace: crosslayer-system
+  labels:
+    app: network-prober-v2
+spec:
+  clusterIP: None
+  selector:
+    app: network-prober-v2
+  ports:
+    - name: metrics
+      port: 9116
+      targetPort: metrics
+      protocol: TCP
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: crosslayer-network-prober-v2
+  namespace: crosslayer-system
+  labels:
+    release: kube-prom-stack
+spec:
+  namespaceSelector:
+    matchNames: ["crosslayer-system"]
+  selector:
+    matchLabels:
+      app: network-prober-v2
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 10s
+      scrapeTimeout: 5s

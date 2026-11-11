@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: crosslayer-system
+  labels:
+    project: crosslayer
+    purpose: controller
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: crosslayer-workloads
+  labels:
+    project: crosslayer
+    purpose: application
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: crosslayer-ml
+  labels:
+    project: crosslayer
+    purpose: ml-engine
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: crosslayer-experiments
+  labels:
+    project: crosslayer
+    purpose: experiments

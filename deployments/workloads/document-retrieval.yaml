@@ -1,0 +1,118 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: document-retrieval
+  namespace: crosslayer-workloads
+  labels:
+    app: document-retrieval
+    project: crosslayer
+    component: workload
+    version: v0.1.0
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: document-retrieval
+  template:
+    metadata:
+      labels:
+        app: document-retrieval
+        project: crosslayer
+        component: workload
+        version: v0.1.0
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+      - name: document-retrieval
+        image: localhost:32000/crosslayer/document-retrieval:v0.1.0
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        env:
+        - name: SERVICE_NAME
+          value: "document-retrieval"
+        - name: SERVICE_VERSION
+          value: "0.1.0"
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "256Mi"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 15
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: DoNotSchedule
+        labelSelector:
+          matchLabels:
+            app: document-retrieval
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: document-retrieval
+  namespace: crosslayer-workloads
+  labels:
+    app: document-retrieval
+    project: crosslayer
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app: document-retrieval
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: document-retrieval-nodeport
+  namespace: crosslayer-workloads
+  labels:
+    app: document-retrieval
+    project: crosslayer
+spec:
+  type: NodePort
+  ports:
+  - port: 80
+    targetPort: 8080
+    nodePort: 30080
+    protocol: TCP
+    name: http
+  selector:
+    app: document-retrieval

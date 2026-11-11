@@ -1,0 +1,58 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: document-retrieval
+  namespace: crosslayer-workloads
+  labels:
+    app: document-retrieval
+    project: crosslayer
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+      protocol: TCP
+  selector:
+    app: crosslayer-envoy
+    envoy_service: document-retrieval
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: document-retrieval-nodeport
+  namespace: crosslayer-workloads
+  labels:
+    app: document-retrieval
+    project: crosslayer
+spec:
+  type: NodePort
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+      nodePort: 30080
+      protocol: TCP
+  selector:
+    app: crosslayer-envoy
+    envoy_service: document-retrieval
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: document-verification
+  namespace: crosslayer-workloads
+  labels:
+    app: document-verification
+    project: crosslayer
+spec:
+  type: NodePort
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+      nodePort: 30081
+      protocol: TCP
+  selector:
+    app: crosslayer-envoy
+    envoy_service: document-verification
