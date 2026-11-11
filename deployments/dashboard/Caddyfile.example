@@ -1,3 +1,3 @@
-dashboard-name.duckdns.org {
+my-crooslayerdashboard.duckdns.org {
     reverse_proxy 10.2.0.145:30080
 }
