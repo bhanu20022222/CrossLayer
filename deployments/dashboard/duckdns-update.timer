@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh the CrossLayer DuckDNS address
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=5min
+Persistent=true
+Unit=duckdns-update.service
+
+[Install]
+WantedBy=timers.target

@@ -266,8 +266,8 @@ Open `http://127.0.0.1:5173` (or `http://127.0.0.1:5174` if port 5173 is occupie
 
 The production layout serves the React app from Netlify and runs the API inside the
 always-on Kubernetes cluster. Netlify proxies `/api/*` to the API over HTTPS, so
-browser sessions remain same-origin. A Tailscale Funnel on the cluster master provides
-the public HTTPS endpoint without requiring a custom domain. The cluster must remain
+browser sessions remain same-origin. Caddy on the cluster master provides the public
+HTTPS endpoint using a DuckDNS hostname. The cluster master and router must remain
 powered on and connected to the internet; do not expose Kubernetes' API server.
 
 ### Netlify
@@ -275,8 +275,8 @@ powered on and connected to the internet; do not expose Kubernetes' API server.
 The repository root `netlify.toml` configures the frontend build and API function.
 Connect the private GitHub repository `bhanu20022222/CrossLayer` to Netlify and deploy
 the `main` branch. Netlify assigns a `*.netlify.app` address; a `*.netlify.in` address
-is not a Netlify-provided subdomain. The API origin is configured after Funnel is
-running.
+is not a Netlify-provided subdomain. Keep the site private until the API endpoint and
+dashboard login have been tested. Configure the API origin after Caddy is serving HTTPS.
 
 ### Build the API image
 
@@ -334,37 +334,81 @@ microk8s kubectl -n crosslayer-dashboard rollout status deployment/crosslayer-da
 ```
 
 The API uses a read-only Kubernetes service account, the in-cluster Prometheus service,
-and the experiment API service. Its NodePort is for the private cluster network; do not
-add a router port-forward for it.
+and the experiment API service. Its NodePort is for the private cluster network. Do not
+expose NodePort `30080` directly on the router.
 
-### Publish the API with Tailscale Funnel
+### Publish the API with DuckDNS and Caddy
 
-On the MicroK8s master, install Tailscale from its official package instructions, then
-sign the master into your Tailscale account:
+This route makes the authenticated dashboard API publicly reachable. Use a new, strong
+dashboard password. Never expose the Kubernetes API server, Prometheus ports, or NodePort
+`30080` on the router.
 
-```bash
-curl -fsSL https://tailscale.com/install.sh | sh
-sudo tailscale up
-```
+1. Create a free DuckDNS hostname at [duckdns.org](https://www.duckdns.org/) and note
+   the subdomain and update token. Do not send the token in chat or commit it.
+2. Check that the router has a public IPv4 address: compare its WAN IPv4 address with
+   `curl -4 https://api.ipify.org` from the master. If the router WAN address is private,
+   in `100.64.0.0/10`, or differs because of upstream carrier-grade NAT, port forwarding
+   will not work; contact the ISP for a public IP or use another tunnel provider.
+3. Give the MicroK8s master a reserved LAN address in the router (currently
+   `10.2.0.145`). Forward **TCP 80 and 443 only** from the router to that address. If a
+   host firewall is enabled, allow inbound TCP 80 and 443. Do not forward ports `30080`,
+   `8003`, `9091`, or Kubernetes API ports.
+4. Configure the DuckDNS updater on the master. Create a root-only curl config; replace
+   the placeholders locally, and keep this file out of Git:
 
-Complete the sign-in flow using the URL printed by the command. In the Tailscale
-admin console, enable Funnel for the master if prompted. Then publish only the dashboard
-NodePort over HTTPS:
+   ```bash
+   sudo install -d -o root -g root -m 700 /etc/duckdns
+   sudoedit /etc/duckdns/curl.conf
+   ```
 
-```bash
-sudo tailscale funnel --bg --https=443 http://10.2.0.145:30080
-sudo tailscale funnel status
-```
+   Put the following in the editor, using the DuckDNS subdomain only (without
+   `.duckdns.org`):
 
-Copy the `https://…ts.net` URL reported by Funnel. In Netlify, set the site environment
-variable `CROSSLAYER_API_ORIGIN` to that HTTPS origin (without a path or trailing
-slash), then trigger a new deploy. The Netlify function rejects non-HTTPS origins and
-does not forward browser requests to arbitrary hosts.
+   ```text
+   url = "https://www.duckdns.org/update?domains=YOUR_SUBDOMAIN&token=YOUR_TOKEN&ip="
+   fail
+   silent
+   show-error
+   ```
 
-The Tailscale daemon and Funnel configuration persist on the master across laptop
-restarts. Kubernetes restarts the API Pod automatically. The master and cluster still
-need to remain online. If the API image is updated, restart its Deployment to pull the
-new image:
+   Save it, then secure the file and enable the periodic update:
+
+   ```bash
+   sudo chown root:root /etc/duckdns/curl.conf
+   sudo chmod 600 /etc/duckdns/curl.conf
+   sudo install -m 644 deployments/dashboard/duckdns-update.service /etc/systemd/system/
+   sudo install -m 644 deployments/dashboard/duckdns-update.timer /etc/systemd/system/
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now duckdns-update.timer
+   sudo systemctl start duckdns-update.service
+   sudo systemctl status duckdns-update.service
+   ```
+
+   Confirm the hostname resolves to the router's public IPv4 address before continuing.
+   The systemd timer refreshes the record every five minutes and after boot.
+5. Install Caddy using the official instructions for the master's Linux distribution.
+   Copy the example and replace its hostname with the full DuckDNS hostname:
+
+   ```bash
+   sudo install -m 644 deployments/dashboard/Caddyfile.example /etc/caddy/Caddyfile
+   sudoedit /etc/caddy/Caddyfile
+   sudo caddy validate --config /etc/caddy/Caddyfile
+   sudo systemctl enable --now caddy
+   ```
+
+   Caddy obtains and renews the HTTPS certificate automatically and reverse-proxies to
+   the private dashboard NodePort. Verify from a device outside the home network (for
+   example, on mobile data): `https://YOUR_SUBDOMAIN.duckdns.org/` should return the
+   dashboard API response over HTTPS.
+6. In Netlify, set `CROSSLAYER_API_ORIGIN` to
+   `https://YOUR_SUBDOMAIN.duckdns.org` (no path or trailing slash), then redeploy. The
+   Netlify function rejects non-HTTPS origins and does not forward browser requests to
+   arbitrary hosts. Log in and verify Kubernetes and Prometheus data before making the
+   Netlify site public.
+
+The DuckDNS timer, Caddy service, and Kubernetes Deployment persist across laptop
+restarts. The master, router, and cluster still need to remain online. If the API image
+is updated, restart its Deployment to pull the new image:
 
 ```bash
 microk8s kubectl -n crosslayer-dashboard rollout restart deployment/crosslayer-dashboard

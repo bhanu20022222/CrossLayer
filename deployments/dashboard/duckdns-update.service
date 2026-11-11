@@ -1,0 +1,10 @@
+[Unit]
+Description=Update the CrossLayer DuckDNS address
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/curl --config /etc/duckdns/curl.conf
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
