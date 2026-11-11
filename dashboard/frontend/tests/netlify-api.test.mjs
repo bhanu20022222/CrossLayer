@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
-import handler from "./api.mjs";
+import handler from "../netlify/functions/api.mjs";
 
 const originalOrigin = process.env.CROSSLAYER_API_ORIGIN;
 const originalFetch = globalThis.fetch;
