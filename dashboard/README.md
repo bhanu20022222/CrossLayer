@@ -262,6 +262,114 @@ for example, `http://127.0.0.1:8007`.
 
 Open `http://127.0.0.1:5173` (or `http://127.0.0.1:5174` if port 5173 is occupied).
 
+## Persistent deployment
+
+The production layout serves the React app from Netlify and runs the API inside the
+always-on Kubernetes cluster. Netlify proxies `/api/*` to the API over HTTPS, so
+browser sessions remain same-origin. A Tailscale Funnel on the cluster master provides
+the public HTTPS endpoint without requiring a custom domain. The cluster must remain
+powered on and connected to the internet; do not expose Kubernetes' API server.
+
+### Netlify
+
+The repository root `netlify.toml` configures the frontend build and API function.
+Connect the private GitHub repository `bhanu20022222/CrossLayer` to Netlify and deploy
+the `main` branch. Netlify assigns a `*.netlify.app` address; a `*.netlify.in` address
+is not a Netlify-provided subdomain. The API origin is configured after Funnel is
+running.
+
+### Build the API image
+
+The GitHub Actions workflow publishes
+`ghcr.io/bhanu20022222/crosslayer-dashboard-backend:latest` whenever the backend or
+workflow changes. The image is private. On GitHub, create a classic personal access
+token with only `read:packages`; never commit it or share it in chat.
+
+On the MicroK8s master, authenticate to GitHub Container Registry and create the image
+pull secret:
+
+```bash
+read -r -p "GitHub username: " GHCR_USER
+read -r -s -p "GitHub token (read:packages): " GHCR_TOKEN
+printf '\n'
+microk8s kubectl create namespace crosslayer-dashboard
+microk8s kubectl -n crosslayer-dashboard create secret docker-registry ghcr-pull \
+  --docker-server=ghcr.io \
+  --docker-username="$GHCR_USER" \
+  --docker-password="$GHCR_TOKEN"
+unset GHCR_USER GHCR_TOKEN
+```
+
+Create a new dashboard login and signing secret on the master. Do not reuse the
+development password or put these values in Git:
+
+```bash
+read -r -p "Dashboard username: " DASHBOARD_USER
+read -r -s -p "New strong dashboard password: " DASHBOARD_PASSWORD
+printf '\n'
+DASHBOARD_SECRET="$(openssl rand -base64 48)"
+USER_B64="$(printf %s "$DASHBOARD_USER" | base64 -w0)"
+PASSWORD_B64="$(printf %s "$DASHBOARD_PASSWORD" | base64 -w0)"
+SECRET_B64="$(printf %s "$DASHBOARD_SECRET" | base64 -w0)"
+cat <<EOF | microk8s kubectl apply -f -
+apiVersion: v1
+kind: Secret
+metadata:
+  name: crosslayer-dashboard-auth
+  namespace: crosslayer-dashboard
+type: Opaque
+data:
+  username: ${USER_B64}
+  password: ${PASSWORD_B64}
+  auth-secret: ${SECRET_B64}
+EOF
+unset DASHBOARD_USER DASHBOARD_PASSWORD DASHBOARD_SECRET USER_B64 PASSWORD_B64 SECRET_B64
+```
+
+Apply the deployment after the GitHub Actions image build has succeeded:
+
+```bash
+microk8s kubectl apply -f deployments/dashboard/kubernetes.yaml
+microk8s kubectl -n crosslayer-dashboard rollout status deployment/crosslayer-dashboard
+```
+
+The API uses a read-only Kubernetes service account, the in-cluster Prometheus service,
+and the experiment API service. Its NodePort is for the private cluster network; do not
+add a router port-forward for it.
+
+### Publish the API with Tailscale Funnel
+
+On the MicroK8s master, install Tailscale from its official package instructions, then
+sign the master into your Tailscale account:
+
+```bash
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up
+```
+
+Complete the sign-in flow using the URL printed by the command. In the Tailscale
+admin console, enable Funnel for the master if prompted. Then publish only the dashboard
+NodePort over HTTPS:
+
+```bash
+sudo tailscale funnel --bg --https=443 http://10.2.0.145:30080
+sudo tailscale funnel status
+```
+
+Copy the `https://…ts.net` URL reported by Funnel. In Netlify, set the site environment
+variable `CROSSLAYER_API_ORIGIN` to that HTTPS origin (without a path or trailing
+slash), then trigger a new deploy. The Netlify function rejects non-HTTPS origins and
+does not forward browser requests to arbitrary hosts.
+
+The Tailscale daemon and Funnel configuration persist on the master across laptop
+restarts. Kubernetes restarts the API Pod automatically. The master and cluster still
+need to remain online. If the API image is updated, restart its Deployment to pull the
+new image:
+
+```bash
+microk8s kubectl -n crosslayer-dashboard rollout restart deployment/crosslayer-dashboard
+```
+
 ## Implementation order
 
 1. Envelope + health + Prometheus/K8s clients (fail closed).

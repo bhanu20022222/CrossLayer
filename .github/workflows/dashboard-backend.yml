@@ -1,0 +1,34 @@
+name: Publish dashboard backend
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - dashboard/backend/**
+      - .github/workflows/dashboard-backend.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: dashboard/backend
+          push: true
+          tags: |
+            ghcr.io/bhanu20022222/crosslayer-dashboard-backend:latest
+            ghcr.io/bhanu20022222/crosslayer-dashboard-backend:${{ github.sha }}

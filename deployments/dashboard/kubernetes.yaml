@@ -1,0 +1,127 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: crosslayer-dashboard
+  namespace: crosslayer-dashboard
+automountServiceAccountToken: true
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: crosslayer-dashboard-read
+rules:
+  - apiGroups: [""]
+    resources: ["nodes", "pods", "endpoints", "namespaces"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: crosslayer-dashboard-read
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: crosslayer-dashboard-read
+subjects:
+  - kind: ServiceAccount
+    name: crosslayer-dashboard
+    namespace: crosslayer-dashboard
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crosslayer-dashboard
+  namespace: crosslayer-dashboard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: crosslayer-dashboard
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: crosslayer-dashboard
+    spec:
+      serviceAccountName: crosslayer-dashboard
+      imagePullSecrets:
+        - name: ghcr-pull
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: ghcr.io/bhanu20022222/crosslayer-dashboard-backend:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8006
+          env:
+            - name: CROSSLAYER_PROMETHEUS_URL
+              value: http://kube-prom-stack-kube-prome-prometheus.observability.svc.cluster.local:9090
+            - name: CROSSLAYER_EXPERIMENT_TARGET_URL
+              value: http://experiment-api.crosslayer-experiments.svc.cluster.local:8080/work
+            - name: CROSSLAYER_WORKLOAD_NAMESPACE
+              value: crosslayer-workloads
+            - name: CROSSLAYER_AUTH_COOKIE_SECURE
+              value: "true"
+            - name: CROSSLAYER_AUTH_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: crosslayer-dashboard-auth
+                  key: username
+            - name: CROSSLAYER_AUTH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: crosslayer-dashboard-auth
+                  key: password
+            - name: CROSSLAYER_AUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: crosslayer-dashboard-auth
+                  key: auth-secret
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: crosslayer-dashboard
+  namespace: crosslayer-dashboard
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: crosslayer-dashboard
+  ports:
+    - name: http
+      port: 8006
+      targetPort: http
+      nodePort: 30080
