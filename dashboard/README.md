@@ -278,27 +278,22 @@ the `main` branch. Netlify assigns a `*.netlify.app` address; a `*.netlify.in` a
 is not a Netlify-provided subdomain. Keep the site private until the API endpoint and
 dashboard login have been tested. Configure the API origin after Caddy is serving HTTPS.
 
-### Build the API image
+### Build and publish the API image
 
-The GitHub Actions workflow publishes
-`ghcr.io/bhanu20022222/crosslayer-dashboard-backend:latest` whenever the backend or
-workflow changes. The image is private. On GitHub, create a classic personal access
-token with only `read:packages`; never commit it or share it in chat.
+The MicroK8s worker currently receives a self-signed TLS certificate when it connects
+to GHCR, so the cluster cannot validate that registry's certificate. Do not disable TLS
+verification or add an unverified root certificate. Instead, publish to the existing
+cluster registry at `10.2.0.145:32000` using the PowerShell helper:
 
-On the MicroK8s master, authenticate to GitHub Container Registry and create the image
-pull secret:
-
-```bash
-read -r -p "GitHub username: " GHCR_USER
-read -r -s -p "GitHub token (read:packages): " GHCR_TOKEN
-printf '\n'
-microk8s kubectl create namespace crosslayer-dashboard
-microk8s kubectl -n crosslayer-dashboard create secret docker-registry ghcr-pull \
-  --docker-server=ghcr.io \
-  --docker-username="$GHCR_USER" \
-  --docker-password="$GHCR_TOKEN"
-unset GHCR_USER GHCR_TOKEN
+```powershell
+.\deployments\dashboard\publish-image.ps1
 ```
+
+Docker Desktop must be running. The helper builds the API image and publishes its
+already-compressed layers without recompressing them to the MicroK8s registry over HTTP.
+That registry is intended for cluster-network use only;
+never expose port `32000` on the router. Run the helper again after backend changes,
+then restart the Deployment to pull the updated `latest` image.
 
 Create a new dashboard login and signing secret on the master. Do not reuse the
 development password or put these values in Git:
@@ -326,7 +321,7 @@ EOF
 unset DASHBOARD_USER DASHBOARD_PASSWORD DASHBOARD_SECRET USER_B64 PASSWORD_B64 SECRET_B64
 ```
 
-Apply the deployment after the GitHub Actions image build has succeeded:
+Apply the deployment after the image has been published:
 
 ```bash
 microk8s kubectl apply -f deployments/dashboard/kubernetes.yaml
